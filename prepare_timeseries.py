@@ -112,38 +112,16 @@ def prepare_timeseries(
     outlier_bounds: dict = None
 ):
     """
-    Prepare and clean a time series dataset for resource utilization.
+    Prepare and clean a time series dataset for Azure VM CPU utilization.
 
     Args:
         raw_data_path (str): Path to the raw CSV dataset.
         output_path (str): Path to save the cleaned time series CSV.
-        columns (list): List of columns to extract and clean.
-        outlier_bounds (dict): Dict of {col: (min, max)} for outlier removal.
+        columns (list): List of columns to extract and clean (optional).
+        outlier_bounds (dict): Dict of {col: (min, max)} for outlier removal (optional).
     """
-    # Try to infer the correct columns from the AzurePublicDataset schema
-    # For 2019 trace, the columns are:
-    # 1. Encrypted subscription id
-    # 2. Encrypted deployment id 
-    # 3. Timestamp in seconds (starting from 0) when first VM created
-    # 4. Count VMs created
-    # 5. Deployment size
-    # 6. Encrypted VM id
-    # 7. Timestamp VM created
-    # 8. Timestamp VM deleted
-    # 9. Max CPU utilization
-    # 10. Avg CPU utilization
-    # 11. P95 of Max CPU utilization
-    # 12. VM category
-    # 13. VM virtual core count bucket
-    # 14. VM memory (GBs) bucket
-    # 15. Timestamp in seconds (every 5 minutes)
-    # 16. Min CPU utilization during the 5 minutes
-    # 17. Max CPU utilization during the 5 minutes
-    # 18. Avg CPU utilization during the 5 minutes
-    # 19. VM virtual core count bucket definition
-    # 20. VM memory (GBs) bucket definition
-
-    # For 2017 trace, the columns are similar but with slight differences.
+    # The canonical Azure 2019 VM CPU readings schema is:
+    # reading_ts,vm_id,min_cpu_5min,max_cpu_5min,avg_cpu_5min
 
     # Read the raw data
     df = pd.read_csv(raw_data_path)
@@ -151,68 +129,43 @@ def prepare_timeseries(
     # If the file is empty, print a warning and return
     if df.shape[0] == 0 or df.shape[1] == 0:
         print("Warning: No data found in the concatenated CSV. Please check the input files and schema.")
-        # Save an empty file for downstream steps
         df.to_csv(output_path, index=False)
         return
 
-    # Check for header/data mismatch and fix if needed
-    if len(df) > 0:
-        header_cols = list(df.columns)
-        first_row = df.iloc[0]
-        if len(header_cols) > len(first_row):
-            # Drop extra header columns
-            df = df[header_cols[:len(first_row)]]
-        elif len(header_cols) < len(first_row):
-            # Add generic column names for extra columns
-            for j in range(len(first_row) - len(header_cols)):
-                df[f"extra_col_{j+1}"] = None
-
-    # Try to detect the schema by number of columns
-    if set(['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']).issubset(df.columns):
-        # Azure 2019 Public Dataset V2 - Trace Analysis: expected columns
-        df = df[['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']]
-        # Sort and clean
-        df = df.sort_values(['vm_id', 'reading_ts'])
-        df = df.ffill().dropna()
-        df = df.drop_duplicates()
-        for col in ['min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']:
-            df = df[(df[col] >= 0) & (df[col] <= 100)]
-    elif len(df.columns) >= 18:
-        # 2019 or 2017 schema, but columns not named
-        df.columns = [
-            "subscription_id", "deployment_id", "first_vm_ts", "count_vms_created", "deployment_size",
-            "vm_id", "vm_created_ts", "vm_deleted_ts", "max_cpu", "avg_cpu", "p95_cpu",
-            "vm_category", "vm_cores_bucket", "vm_mem_bucket", "reading_ts",
-            "min_cpu_5min", "max_cpu_5min", "avg_cpu_5min", "core_bucket_def", "mem_bucket_def"
-        ][:len(df.columns)]
-        if set(['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']).issubset(df.columns):
-            df = df[['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']]
-            df = df.sort_values(['vm_id', 'reading_ts'])
-            df = df.ffill().dropna()
-            df = df.drop_duplicates()
-            for col in ['min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']:
-                df = df[(df[col] >= 0) & (df[col] <= 100)]
+    # If the columns are unnamed or generic, assign the correct schema
+    expected_cols = ['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']
+    # If the file has more columns, try to find the expected columns
+    if set(expected_cols).issubset(df.columns):
+        # Already has correct columns
+        df = df[expected_cols]
+    elif len(df.columns) >= 5:
+        # Try to assign expected columns if unnamed or generic
+        # Accept both with and without header
+        # If first row is not header, assign columns
+        if not any(x.isalpha() for x in str(df.columns[0])):
+            df.columns = expected_cols + [f"extra_col_{i+1}" for i in range(len(df.columns)-5)]
+            df = df[expected_cols]
         else:
-            print("Warning: Could not find expected time series columns after renaming.")
-    elif len(df.columns) == 6:
-        # Fallback for 6-column files (likely: subscription_id, deployment_id, first_vm_ts, count_vms_created, deployment_size, vm_id)
-        df.columns = [
-            "subscription_id", "deployment_id", "first_vm_ts", "count_vms_created", "deployment_size", "vm_id"
-        ]
-        print("Warning: Only 6 columns found. No time series or CPU utilization data present in this file.")
+            # Try to find columns by position
+            df = df.iloc[:, :5]
+            df.columns = expected_cols
     else:
-        print(f"Warning: Unknown schema with {len(df.columns)} columns. Columns: {list(df.columns)}")
-        # Save the raw data for inspection
+        print(f"Warning: Could not find expected time series columns. Columns: {list(df.columns)}")
         df.to_csv(output_path, index=False)
         return
+
+    # Sort and clean
+    df = df.sort_values(['vm_id', 'reading_ts'])
+    df = df.ffill().dropna()
+    df = df.drop_duplicates()
+    for col in ['min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']:
+        df = df[(df[col] >= 0) & (df[col] <= 100)]
 
     # Save cleaned time series
     df.to_csv(output_path, index=False)
     print(f"Cleaned time series saved to {output_path}")
-    # Print header and a few rows for inspection
     print("Sample of cleaned CSV:")
     print(df.head())
-    # Check if generated CSV is per VM
     if 'vm_id' in df.columns:
         unique_vms = df['vm_id'].nunique()
         print(f"Number of unique VMs in cleaned CSV: {unique_vms}")
