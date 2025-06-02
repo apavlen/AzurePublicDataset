@@ -23,4 +23,26 @@ vm_cpu_readings/vm_cpu_readings-file-*-of-195.csv.gz,1,timestamp,INTEGER
 vm_cpu_readings/vm_cpu_readings-file-*-of-195.csv.gz,2,vm id,STRING_HASH
 vm_cpu_readings/vm_cpu_readings-file-*-of-195.csv.gz,3,min cpu,DOUBLE
 vm_cpu_readings/vm_cpu_readings-file-*-of-195.csv.gz,4,max cpu,DOUBLE
-vm_cpu_readings/vm_cpu_readings-file-*-of-195.csv.gz,5,avg cpu,DOUBLE
+vm_cpu_readings/vm_cpu_readings-file-*-of-195.csv.gz,5,avg cpu,DOUBLETable,Column,Type,Description
+vmtable,vmid,string,Anonymized VM identifier
+vmtable,subscriptionid,string,Anonymized subscription identifier
+vmtable,deploymentid,string,Anonymized deployment identifier
+vmtable,vmcreated,int,VM creation time (seconds since trace start)
+vmtable,vmdeleted,int,VM deletion time (seconds since trace start)
+vmtable,maxcpu,float,Maximum CPU utilization (%)
+vmtable,avgcpu,float,Average CPU utilization (%)
+vmtable,p95maxcpu,float,95th percentile of maximum CPU utilization (%)
+vmtable,vmcategory,string,VM workload category
+vmtable,vmcorecountbucket,string,VM core count bucket
+vmtable,vmmemorybucket,string,VM memory size bucket
+vmtable,lifetime,float,VM lifetime (hours)
+vmtable,corehour,float,VM core hours
+deployments,deploymentid,string,Anonymized deployment identifier
+deployments,deploymentsize,int,Number of VMs in deployment
+subscriptions,subscriptionid,string,Anonymized subscription identifier
+subscriptions,subscriptiontype,string,Subscription type
+vm_cpu_readings,reading_ts,int,Timestamp (seconds since deployment start)
+vm_cpu_readings,vm_id,string,Anonymized VM identifier
+vm_cpu_readings,min_cpu_5min,float,Minimum CPU utilization in 5-min interval (%)
+vm_cpu_readings,max_cpu_5min,float,Maximum CPU utilization in 5-min interval (%)
+vm_cpu_readings,avg_cpu_5min,float,Average CPU utilization in 5-min interval (%)
