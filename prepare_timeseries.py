@@ -115,15 +115,13 @@ def prepare_timeseries(
                 "min_cpu_5min", "max_cpu_5min", "avg_cpu_5min", "core_bucket_def", "mem_bucket_def"
             ][:len(df.columns)]
         # Use the correct columns for time series
-        # We'll use: reading_ts, vm_id, min_cpu_5min, max_cpu_5min, avg_cpu_5min
-        columns = ["reading_ts", "vm_id", "min_cpu_5min", "max_cpu_5min", "avg_cpu_5min"]
+        # We'll use: reading_ts, vm_id, avg_cpu_5min
+        columns = ["reading_ts", "vm_id", "avg_cpu_5min"]
         df = df[columns]
-        # Rename for consistency
+        # Rename for consistency with README
         df = df.rename(columns={
             "reading_ts": "timestamp",
-            "min_cpu_5min": "CPU_min",
-            "max_cpu_5min": "CPU_max",
-            "avg_cpu_5min": "CPU_avg"
+            "avg_cpu_5min": "CPU"
         })
     else:
         raise ValueError("Unknown schema: cannot find expected columns in raw data.")
@@ -142,9 +140,8 @@ def prepare_timeseries(
     # Remove duplicates
     df = df.drop_duplicates()
 
-    # Remove outliers for CPU columns
-    for col in ['CPU_min', 'CPU_max', 'CPU_avg']:
-        df = df[(df[col] >= 0) & (df[col] <= 100)]
+    # Remove outliers for CPU column
+    df = df[(df['CPU'] >= 0) & (df['CPU'] <= 100)]
 
     # Save cleaned time series
     df.to_csv(output_path, index=False)
