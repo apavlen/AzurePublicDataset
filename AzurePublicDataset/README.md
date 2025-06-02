@@ -39,38 +39,35 @@ Prepare a clean time series dataset for resource utilization (CPU, memory, IO, e
 
 ---
 
-## Anticipated Time Series Dataset Header
+## Azure VM CPU Readings Time Series Dataset Header
 
-Based on the datasets described in this repository, the time series for resource utilization should be structured as follows:
+Based on the AzurePublicDataset documentation and the analysis notebook, the time series for VM CPU utilization should be structured as follows:
 
 ```
-timestamp,vm_id,CPU,Memory,IO,Network,Disk
+reading_ts,vm_id,min_cpu_5min,max_cpu_5min,avg_cpu_5min
 ```
 
-- `timestamp`: The time of the measurement (in a consistent datetime format).
-- `vm_id`: The unique identifier for the virtual machine (or workload).
-- `CPU`: CPU utilization value (percentage or normalized).
-- `Memory`: Memory utilization value.
-- `IO`: Input/Output utilization value.
-- `Network`: Network utilization value.
-- `Disk`: Disk utilization value.
+- `reading_ts`: The timestamp of the measurement (seconds since deployment start, or as provided in the dataset).
+- `vm_id`: The unique identifier for the virtual machine.
+- `min_cpu_5min`: Minimum CPU utilization during the 5-minute interval.
+- `max_cpu_5min`: Maximum CPU utilization during the 5-minute interval.
+- `avg_cpu_5min`: Average CPU utilization during the 5-minute interval.
 
-This structure allows for time series analysis per VM or per workload, as required.
+This structure allows for time series analysis per VM, as required.
 
 ---
 
-## Example: Prepare and Clean Resource Utilization Time Series
+## Example: Prepare and Clean Azure VM CPU Utilization Time Series
 
-Below is a Python script (`prepare_timeseries.py`) that demonstrates how to extract, construct, and clean a time series dataset for CPU, memory, IO, network, and disk utilization per VM from a CSV file.
+Below is a Python script (`prepare_timeseries.py`) that demonstrates how to extract, construct, and clean a time series dataset for CPU utilization per VM from the Azure 2019 Public Dataset V2.
 
 ### Usage
 
-1. Place your raw dataset (CSV) in the working directory.
-2. Update the `RAW_DATA_PATH` and `OUTPUT_PATH` variables in the script as needed.
-3. Run the script:
+1. Download and decompress the raw Azure VM CPU readings dataset (CSV or CSV.GZ).
+2. Run the script:
 
 ```bash
-python prepare_timeseries.py
+python prepare_timeseries.py --download_url <URL_TO_CSV_GZ> --plot
 ```
 
 ### Example Script
@@ -86,22 +83,23 @@ OUTPUT_PATH = "data/cleaned_resource_timeseries.csv"
 # Load the raw data
 df = pd.read_csv(RAW_DATA_PATH)
 
-# Select relevant columns and rename if necessary
-# Adjust these column names to match your dataset
-df = df[['timestamp', 'vm_id', 'CPU', 'Memory', 'IO', 'Network', 'Disk']]
+# Select relevant columns and rename for clarity
+df = df[['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']]
 
-# Convert timestamp to datetime and sort
-df['timestamp'] = pd.to_datetime(df['timestamp'])
-df = df.sort_values(['vm_id', 'timestamp'])
+# Convert timestamp to datetime if desired (optional)
+# df['reading_ts'] = pd.to_datetime(df['reading_ts'], unit='s')
+
+# Sort by VM and timestamp
+df = df.sort_values(['vm_id', 'reading_ts'])
 
 # Handle missing values (forward fill, then drop remaining)
-df = df.fillna(method='ffill').dropna()
+df = df.ffill().dropna()
 
 # Remove duplicates
 df = df.drop_duplicates()
 
-# Optionally, remove outliers (e.g., utilization outside 0-100%)
-for col in ['CPU', 'Memory', 'IO', 'Network', 'Disk']:
+# Remove outliers (e.g., utilization outside 0-100%)
+for col in ['min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']:
     df = df[(df[col] >= 0) & (df[col] <= 100)]
 
 # Save cleaned time series

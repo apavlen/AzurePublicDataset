@@ -160,58 +160,40 @@ def prepare_timeseries(
                 df[f"extra_col_{j+1}"] = None
 
     # Try to detect the schema by number of columns
-    if len(df.columns) >= 18:
-        # 2019 or 2017 schema
-        # Assign column names if not present
-        if not all(isinstance(c, str) for c in df.columns):
-            # Assign names for 2019
-            df.columns = [
-                "subscription_id", "deployment_id", "first_vm_ts", "count_vms_created", "deployment_size",
-                "vm_id", "vm_created_ts", "vm_deleted_ts", "max_cpu", "avg_cpu", "p95_cpu",
-                "vm_category", "vm_cores_bucket", "vm_mem_bucket", "reading_ts",
-                "min_cpu_5min", "max_cpu_5min", "avg_cpu_5min", "core_bucket_def", "mem_bucket_def"
-            ][:len(df.columns)]
-        # Keep all columns, but create new columns for plotting
-        if 'reading_ts' in df.columns:
-            df['timestamp'] = df['reading_ts']
-        if 'avg_cpu_5min' in df.columns:
-            df['CPU'] = df['avg_cpu_5min']
-        if 'max_cpu_5min' in df.columns:
-            df['CPU_max'] = df['max_cpu_5min']
-        if 'min_cpu_5min' in df.columns:
-            df['CPU_min'] = df['min_cpu_5min']
+    if set(['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']).issubset(df.columns):
+        # Azure 2019 Public Dataset V2 - Trace Analysis: expected columns
+        df = df[['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']]
+        # Sort and clean
+        df = df.sort_values(['vm_id', 'reading_ts'])
+        df = df.ffill().dropna()
+        df = df.drop_duplicates()
+        for col in ['min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']:
+            df = df[(df[col] >= 0) & (df[col] <= 100)]
+    elif len(df.columns) >= 18:
+        # 2019 or 2017 schema, but columns not named
+        df.columns = [
+            "subscription_id", "deployment_id", "first_vm_ts", "count_vms_created", "deployment_size",
+            "vm_id", "vm_created_ts", "vm_deleted_ts", "max_cpu", "avg_cpu", "p95_cpu",
+            "vm_category", "vm_cores_bucket", "vm_mem_bucket", "reading_ts",
+            "min_cpu_5min", "max_cpu_5min", "avg_cpu_5min", "core_bucket_def", "mem_bucket_def"
+        ][:len(df.columns)]
+        if set(['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']).issubset(df.columns):
+            df = df[['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']]
+            df = df.sort_values(['vm_id', 'reading_ts'])
+            df = df.ffill().dropna()
+            df = df.drop_duplicates()
+            for col in ['min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']:
+                df = df[(df[col] >= 0) & (df[col] <= 100)]
+        else:
+            print("Warning: Could not find expected time series columns after renaming.")
     elif len(df.columns) == 6:
         # Fallback for 6-column files (likely: subscription_id, deployment_id, first_vm_ts, count_vms_created, deployment_size, vm_id)
-        # Try to assign column names and extract what we can
         df.columns = [
             "subscription_id", "deployment_id", "first_vm_ts", "count_vms_created", "deployment_size", "vm_id"
         ]
-        # No time series or CPU data available, but keep for inspection
         print("Warning: Only 6 columns found. No time series or CPU utilization data present in this file.")
     else:
         raise ValueError("Unknown schema: cannot find expected columns in raw data.")
-
-    # Convert timestamp to datetime if possible (assume seconds since epoch or since trace start)
-    if 'timestamp' in df.columns:
-        try:
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-        except Exception:
-            pass
-
-    # Only sort and clean if the required columns exist
-    if 'vm_id' in df.columns and 'timestamp' in df.columns:
-        df = df.sort_values(['vm_id', 'timestamp'])
-
-    # Handle missing values (forward fill, then drop remaining)
-    df = df.ffill().dropna()
-
-    # Remove duplicates
-    df = df.drop_duplicates()
-
-    # Remove outliers for CPU columns if present
-    for col in ['CPU', 'CPU_max', 'CPU_min']:
-        if col in df.columns:
-            df = df[(df[col] >= 0) & (df[col] <= 100)]
 
     # Save cleaned time series
     df.to_csv(output_path, index=False)
