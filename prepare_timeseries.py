@@ -147,6 +147,18 @@ def prepare_timeseries(
     # Read the raw data
     df = pd.read_csv(raw_data_path)
 
+    # Check for header/data mismatch and fix if needed
+    if len(df) > 0:
+        header_cols = list(df.columns)
+        first_row = df.iloc[0]
+        if len(header_cols) > len(first_row):
+            # Drop extra header columns
+            df = df[header_cols[:len(first_row)]]
+        elif len(header_cols) < len(first_row):
+            # Add generic column names for extra columns
+            for j in range(len(first_row) - len(header_cols)):
+                df[f"extra_col_{j+1}"] = None
+
     # Try to detect the schema by number of columns
     if len(df.columns) >= 18:
         # 2019 or 2017 schema
@@ -160,9 +172,10 @@ def prepare_timeseries(
                 "min_cpu_5min", "max_cpu_5min", "avg_cpu_5min", "core_bucket_def", "mem_bucket_def"
             ][:len(df.columns)]
         # Keep all columns, but create new columns for plotting
-        df['timestamp'] = df['reading_ts']
-        df['CPU'] = df['avg_cpu_5min']
-        # Optionally, add more columns for plotting if available
+        if 'reading_ts' in df.columns:
+            df['timestamp'] = df['reading_ts']
+        if 'avg_cpu_5min' in df.columns:
+            df['CPU'] = df['avg_cpu_5min']
         if 'max_cpu_5min' in df.columns:
             df['CPU_max'] = df['max_cpu_5min']
         if 'min_cpu_5min' in df.columns:
@@ -171,10 +184,11 @@ def prepare_timeseries(
         raise ValueError("Unknown schema: cannot find expected columns in raw data.")
 
     # Convert timestamp to datetime if possible (assume seconds since epoch or since trace start)
-    try:
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-    except Exception:
-        pass
+    if 'timestamp' in df.columns:
+        try:
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        except Exception:
+            pass
 
     # Only sort and clean if the required columns exist
     if 'vm_id' in df.columns and 'timestamp' in df.columns:
