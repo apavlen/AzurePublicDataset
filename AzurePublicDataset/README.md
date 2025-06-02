@@ -63,12 +63,17 @@ Below is a Python script (`prepare_timeseries.py`) that demonstrates how to extr
 
 ### Usage
 
-1. Download and decompress the raw Azure VM CPU readings dataset (CSV or CSV.GZ).
-2. Run the script:
+To prepare per-VM time series files from the Azure 2019 Public Dataset V2:
+
+1. Download and decompress the raw Azure VM CPU readings dataset (CSV or CSV.GZ) using the script.
+2. Run the script to download, decompress, concatenate, and write per-VM time series files:
 
 ```bash
-python prepare_timeseries.py --download_url <URL_TO_CSV_GZ> --plot
+python prepare_timeseries.py --links_file AzurePublicDatasetLinksV2.txt --num_traces 195 --download_dir data/raw_gz --decompressed_dir data/raw_csv --concat_csv data/combined_raw.csv --per_vm_dir data/per_vm_timeseries --decompress_workers 8
 ```
+
+- This will download all 195 VM CPU reading files, decompress them in parallel, concatenate them, and write a cleaned CSV for each VM to `data/per_vm_timeseries/`.
+- You can adjust `--num_traces` to limit the number of files, or `--decompress_workers` for parallelism.
 
 ### Example Script
 
