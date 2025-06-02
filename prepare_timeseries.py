@@ -127,6 +127,15 @@ def prepare_timeseries(raw_data_path: str, output_path: str):
     else:
         print("No 'vm_id' column found in cleaned CSV.")
 
+import hashlib
+
+def _safe_vm_id(vm_id: str) -> str:
+    """
+    Return a filesystem-safe, short, unique string for a VM id.
+    """
+    # Use first 8 chars of sha256 hash for uniqueness and safety
+    return hashlib.sha256(vm_id.encode("utf-8")).hexdigest()[:8]
+
 def plot_timeseries(csv_path: str, vm_ids: list = None, sample: int = 1000, output_dir: str = "plots"):
     """
     Plot all resource columns (except timestamp/vm_id) for each specified VM.
@@ -143,6 +152,7 @@ def plot_timeseries(csv_path: str, vm_ids: list = None, sample: int = 1000, outp
             logging.warning(f"No data found for vm_id={vm_id}")
             continue
         x = df_vm['reading_ts'][:sample]
+        safe_id = _safe_vm_id(vm_id)
         for col in df_vm.columns:
             if col in ['reading_ts', 'vm_id']:
                 continue
@@ -150,10 +160,10 @@ def plot_timeseries(csv_path: str, vm_ids: list = None, sample: int = 1000, outp
             plt.plot(x, df_vm[col][:sample])
             plt.xlabel("reading_ts")
             plt.ylabel(f"{col}")
-            plt.title(f"{col} for VM {vm_id}")
+            plt.title(f"{col} for VM {safe_id}")
             plt.xticks(rotation=45)
             plt.tight_layout()
-            fname = os.path.join(output_dir, f"{vm_id[:12]}_{col}.png")
+            fname = os.path.join(output_dir, f"{safe_id}_{col}.png")
             plt.savefig(fname)
             plt.close()
             logging.info(f"Saved plot: {fname}")
