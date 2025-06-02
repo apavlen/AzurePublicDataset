@@ -130,15 +130,14 @@ def prepare_timeseries(
                 "vm_category", "vm_cores_bucket", "vm_mem_bucket", "reading_ts",
                 "min_cpu_5min", "max_cpu_5min", "avg_cpu_5min", "core_bucket_def", "mem_bucket_def"
             ][:len(df.columns)]
-        # Use the correct columns for time series
-        # We'll use: reading_ts, vm_id, avg_cpu_5min
-        columns = ["reading_ts", "vm_id", "avg_cpu_5min"]
-        df = df[columns]
-        # Rename for consistency with README
-        df = df.rename(columns={
-            "reading_ts": "timestamp",
-            "avg_cpu_5min": "CPU"
-        })
+        # Keep all columns, but create new columns for plotting
+        df['timestamp'] = df['reading_ts']
+        df['CPU'] = df['avg_cpu_5min']
+        # Optionally, add more columns for plotting if available
+        if 'max_cpu_5min' in df.columns:
+            df['CPU_max'] = df['max_cpu_5min']
+        if 'min_cpu_5min' in df.columns:
+            df['CPU_min'] = df['min_cpu_5min']
     else:
         raise ValueError("Unknown schema: cannot find expected columns in raw data.")
 
@@ -148,16 +147,20 @@ def prepare_timeseries(
     except Exception:
         pass
 
-    df = df.sort_values(['vm_id', 'timestamp'])
+    # Only sort and clean if the required columns exist
+    if 'vm_id' in df.columns and 'timestamp' in df.columns:
+        df = df.sort_values(['vm_id', 'timestamp'])
 
     # Handle missing values (forward fill, then drop remaining)
-    df = df.fillna(method='ffill').dropna()
+    df = df.ffill().dropna()
 
     # Remove duplicates
     df = df.drop_duplicates()
 
-    # Remove outliers for CPU column
-    df = df[(df['CPU'] >= 0) & (df['CPU'] <= 100)]
+    # Remove outliers for CPU columns if present
+    for col in ['CPU', 'CPU_max', 'CPU_min']:
+        if col in df.columns:
+            df = df[(df[col] >= 0) & (df[col] <= 100)]
 
     # Save cleaned time series
     df.to_csv(output_path, index=False)
@@ -166,12 +169,15 @@ def prepare_timeseries(
     print("Sample of cleaned CSV:")
     print(df.head())
     # Check if generated CSV is per VM
-    unique_vms = df['vm_id'].nunique()
-    print(f"Number of unique VMs in cleaned CSV: {unique_vms}")
-    print("Rows per VM (first 5 VMs):")
-    for vm in df['vm_id'].unique()[:5]:
-        count = (df['vm_id'] == vm).sum()
-        print(f"  VM {vm}: {count} rows")
+    if 'vm_id' in df.columns:
+        unique_vms = df['vm_id'].nunique()
+        print(f"Number of unique VMs in cleaned CSV: {unique_vms}")
+        print("Rows per VM (first 5 VMs):")
+        for vm in df['vm_id'].unique()[:5]:
+            count = (df['vm_id'] == vm).sum()
+            print(f"  VM {vm}: {count} rows")
+    else:
+        print("No 'vm_id' column found in cleaned CSV.")
 
 def plot_timeseries(csv_path: str, vm_id: str = None, resource: str = "CPU", sample: int = 1000):
     """
@@ -184,11 +190,17 @@ def plot_timeseries(csv_path: str, vm_id: str = None, resource: str = "CPU", sam
         sample (int): Number of points to plot (for speed).
     """
     df = pd.read_csv(csv_path)
+    if 'vm_id' not in df.columns:
+        raise ValueError("No 'vm_id' column found in the CSV. Cannot plot per-VM timeseries.")
     if vm_id is None:
+        if len(df) == 0:
+            raise ValueError("No data available to plot.")
         vm_id = df['vm_id'].iloc[0]
     df_vm = df[df['vm_id'] == vm_id]
     if df_vm.empty:
         raise ValueError(f"No data found for vm_id={vm_id}")
+    if resource not in df_vm.columns:
+        raise ValueError(f"Resource column '{resource}' not found in CSV. Available columns: {list(df_vm.columns)}")
     plt.figure(figsize=(12, 5))
     plt.plot(df_vm['timestamp'][:sample], df_vm[resource][:sample])
     plt.xlabel("Timestamp")
