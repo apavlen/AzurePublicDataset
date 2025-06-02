@@ -39,6 +39,7 @@ def decompress_gz_files(input_dir: str, output_dir: str):
 def concatenate_csv_files(input_dir: str, output_csv: str):
     """
     Concatenate all .csv files in input_dir into a single CSV with header.
+    If the files do not have a header, add a default header for AzurePublicDataset 2019 schema.
     """
     csv_files = sorted(glob.glob(os.path.join(input_dir, "*.csv")))
     if not csv_files:
@@ -46,9 +47,24 @@ def concatenate_csv_files(input_dir: str, output_csv: str):
     with open(output_csv, 'w') as fout:
         for i, fname in enumerate(csv_files):
             with open(fname) as fin:
+                first_line = fin.readline()
+                # Heuristic: if the first value is not a string, assume no header
                 if i == 0:
-                    # Write header for the first file
-                    fout.write(fin.read())
+                    if not any(x.isalpha() for x in first_line.split(",")[0]):
+                        # Add default header for AzurePublicDataset 2019 schema
+                        default_header = (
+                            "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,"
+                            "vm_id,vm_created_ts,vm_deleted_ts,max_cpu,avg_cpu,p95_cpu,"
+                            "vm_category,vm_cores_bucket,vm_mem_bucket,reading_ts,"
+                            "min_cpu_5min,max_cpu_5min,avg_cpu_5min,core_bucket_def,mem_bucket_def\n"
+                        )
+                        fout.write(default_header)
+                        fout.write(first_line)
+                        fout.write(fin.read())
+                    else:
+                        # File has header
+                        fout.write(first_line)
+                        fout.write(fin.read())
                 else:
                     # Skip header for subsequent files
                     next(fin)
