@@ -26,12 +26,15 @@ def download_file(url: str, dest_path: str, chunk_size: int = 8192):
 
 def decompress_gz_files(input_dir: str, output_dir: str):
     """
-    Decompress all .csv.gz files in input_dir to output_dir.
+    Decompress all .csv.gz files in input_dir to output_dir, unless already decompressed.
     """
     os.makedirs(output_dir, exist_ok=True)
     gz_files = glob.glob(os.path.join(input_dir, "*.csv.gz"))
     for gz_file in gz_files:
         out_file = os.path.join(output_dir, os.path.basename(gz_file)[:-3])
+        if os.path.exists(out_file):
+            print(f"File already decompressed, skipping: {out_file}")
+            continue
         print(f"Decompressing {gz_file} to {out_file}")
         with gzip.open(gz_file, 'rb') as f_in, open(out_file, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
@@ -40,6 +43,7 @@ def concatenate_csv_files(input_dir: str, output_csv: str):
     """
     Concatenate all .csv files in input_dir into a single CSV with header.
     If the files do not have a header, add a default header for AzurePublicDataset 2019 schema.
+    If the number of columns in the header does not match the data, adjust the header to match the data columns.
     """
     csv_files = sorted(glob.glob(os.path.join(input_dir, "*.csv")))
     if not csv_files:
@@ -48,23 +52,48 @@ def concatenate_csv_files(input_dir: str, output_csv: str):
         for i, fname in enumerate(csv_files):
             with open(fname) as fin:
                 first_line = fin.readline()
-                # Heuristic: if the first value is not a string, assume no header
+                # Peek at the next line to count columns in data
+                data_line = fin.readline()
+                fin.seek(0)
                 if i == 0:
+                    # Check if file has a header
                     if not any(x.isalpha() for x in first_line.split(",")[0]):
-                        # Add default header for AzurePublicDataset 2019 schema
+                        # No header, add default header
+                        data_cols = len(first_line.strip().split(","))
                         default_header = (
                             "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,"
                             "vm_id,vm_created_ts,vm_deleted_ts,max_cpu,avg_cpu,p95_cpu,"
                             "vm_category,vm_cores_bucket,vm_mem_bucket,reading_ts,"
-                            "min_cpu_5min,max_cpu_5min,avg_cpu_5min,core_bucket_def,mem_bucket_def\n"
-                        )
-                        fout.write(default_header)
+                            "min_cpu_5min,max_cpu_5min,avg_cpu_5min,core_bucket_def,mem_bucket_def"
+                        ).split(",")
+                        # Truncate or pad header to match data columns
+                        if data_cols < len(default_header):
+                            header = ",".join(default_header[:data_cols]) + "\n"
+                        elif data_cols > len(default_header):
+                            header = ",".join(default_header + [f"extra_col_{j+1}" for j in range(data_cols - len(default_header))]) + "\n"
+                        else:
+                            header = ",".join(default_header) + "\n"
+                        fout.write(header)
                         fout.write(first_line)
                         fout.write(fin.read())
                     else:
-                        # File has header
-                        fout.write(first_line)
-                        fout.write(fin.read())
+                        # File has header, check if header matches data columns
+                        header_cols = len(first_line.strip().split(","))
+                        data_cols = len(data_line.strip().split(","))
+                        if header_cols != data_cols:
+                            # Adjust header to match data columns
+                            header = first_line.strip().split(",")
+                            if data_cols < header_cols:
+                                header = header[:data_cols]
+                            elif data_cols > header_cols:
+                                header = header + [f"extra_col_{j+1}" for j in range(data_cols - header_cols)]
+                            fout.write(",".join(header) + "\n")
+                            # Write the first data line and the rest
+                            fout.write(data_line)
+                            fout.write(fin.read())
+                        else:
+                            fout.write(first_line)
+                            fout.write(fin.read())
                 else:
                     # Skip header for subsequent files
                     next(fin)
