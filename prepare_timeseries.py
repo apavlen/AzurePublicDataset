@@ -6,6 +6,7 @@ import gzip
 import re
 import logging
 import matplotlib.pyplot as plt
+import concurrent.futures
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,36 +37,43 @@ def download_vm_traces(links_file: str, download_dir: str, num_traces: int = 1):
         logging.info(f"Downloaded: {fname}")
     logging.info(f"Downloaded {len(urls)} trace files to {download_dir}")
 
-def decompress_gz_files(input_dir: str, output_dir: str):
+def _decompress_single_gz(gz_file, output_dir, header):
+    out_file = os.path.join(output_dir, os.path.basename(gz_file)[:-3])
+    if os.path.exists(out_file):
+        logging.info(f"File already decompressed, skipping: {out_file}")
+        return
+    logging.info(f"Decompressing {gz_file} to {out_file}")
+    with gzip.open(gz_file, 'rt') as f_in:
+        first_line = f_in.readline()
+        has_header = any(x.isalpha() for x in first_line.split(",")[0])
+    with gzip.open(gz_file, 'rt') as f_in, open(out_file, 'w') as f_out:
+        # Always write the correct header
+        f_out.write(header)
+        f_in.seek(0)
+        # If the file has a header, skip it
+        if has_header:
+            next(f_in)
+        for line in f_in:
+            # Only keep the first 5 columns
+            cols = line.rstrip("\n").split(",")
+            if len(cols) >= 5:
+                f_out.write(",".join(cols[:5]) + "\n")
+
+def decompress_gz_files(input_dir: str, output_dir: str, max_workers: int = 8):
     """
     Decompress all .csv.gz files in input_dir to output_dir, unless already decompressed.
     Always add the correct header for Azure VM CPU readings if missing.
     Only keep the columns: reading_ts,vm_id,min_cpu_5min,max_cpu_5min,avg_cpu_5min
+    Uses parallel processing for speed.
     """
     os.makedirs(output_dir, exist_ok=True)
     gz_files = glob.glob(os.path.join(input_dir, "*.csv.gz"))
     header = "reading_ts,vm_id,min_cpu_5min,max_cpu_5min,avg_cpu_5min\n"
-    for gz_file in gz_files:
-        out_file = os.path.join(output_dir, os.path.basename(gz_file)[:-3])
-        if os.path.exists(out_file):
-            print(f"File already decompressed, skipping: {out_file}")
-            continue
-        print(f"Decompressing {gz_file} to {out_file}")
-        with gzip.open(gz_file, 'rt') as f_in:
-            first_line = f_in.readline()
-            has_header = any(x.isalpha() for x in first_line.split(",")[0])
-        with gzip.open(gz_file, 'rt') as f_in, open(out_file, 'w') as f_out:
-            # Always write the correct header
-            f_out.write(header)
-            f_in.seek(0)
-            # If the file has a header, skip it
-            if has_header:
-                next(f_in)
-            for line in f_in:
-                # Only keep the first 5 columns
-                cols = line.rstrip("\n").split(",")
-                if len(cols) >= 5:
-                    f_out.write(",".join(cols[:5]) + "\n")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_decompress_single_gz, gz_file, output_dir, header) for gz_file in gz_files]
+        for future in concurrent.futures.as_completed(futures):
+            # Will raise exceptions if any
+            future.result()
 
 def concatenate_csv_files(input_dir: str, output_csv: str):
     """
@@ -161,13 +169,14 @@ if __name__ == "__main__":
     parser.add_argument("--plot", action="store_true", help="Plot all resource columns for selected VMs after processing")
     parser.add_argument("--plot_dir", type=str, default="plots", help="Directory to save plots")
     parser.add_argument("--plot_vm_count", type=int, default=5, help="Number of VMs to plot")
+    parser.add_argument("--decompress_workers", type=int, default=8, help="Number of parallel workers for decompression")
     args = parser.parse_args()
 
     # Step 1: Download N VM CPU reading traces
     download_vm_traces(args.links_file, args.download_dir, num_traces=args.num_traces)
 
-    # Step 2: Decompress all .csv.gz files in download_dir to decompressed_dir
-    decompress_gz_files(args.download_dir, args.decompressed_dir)
+    # Step 2: Decompress all .csv.gz files in download_dir to decompressed_dir (parallel)
+    decompress_gz_files(args.download_dir, args.decompressed_dir, max_workers=args.decompress_workers)
 
     # Step 3: Concatenate all .csv files in decompressed_dir
     concatenate_csv_files(args.decompressed_dir, args.concat_csv)
