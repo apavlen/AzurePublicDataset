@@ -2,6 +2,82 @@
 
 This repository contains public releases of Microsoft Azure traces for the benefit of the research and academic community.
 
+---
+
+## Timeseries Preparation and Plotting
+
+This repository provides a script, `prepare_timeseries.py`, to help you download, decompress, concatenate, clean, and visualize Azure VM resource utilization timeseries data.
+
+### How to Use
+
+#### 1. Download and Prepare Data
+
+You can use the script to download one or more raw `.csv.gz` files from the Azure public dataset, decompress them, concatenate them into a single CSV, and clean the data for analysis.
+
+**Example: Download, process, and plot a sample timeseries**
+
+```bash
+python prepare_timeseries.py \
+  --download_url https://azurepublicdatasettraces.blob.core.windows.net/azurepublicdatasetv2/trace_data/vm_cpu_readings/vm_cpu_readings-file-1-of-195.csv.gz \
+  --plot
+```
+
+- If you want to process more files, download them into the same directory (e.g., with `wget` or by running the script multiple times with different `--download_url` values).
+- The script will skip downloading files that already exist.
+
+#### 2. Cleaned Output
+
+The script will:
+- Decompress all `.csv.gz` files in `data/raw_gz` to `data/raw_csv`
+- Concatenate all `.csv` files in `data/raw_csv` into `data/combined_raw.csv`
+- Clean and extract the timeseries into `data/cleaned_resource_timeseries.csv`
+
+The cleaned CSV will have columns:
+
+```
+timestamp,vm_id,CPU_min,CPU_max,CPU_avg
+```
+
+- `timestamp`: The time of the measurement (as datetime)
+- `vm_id`: The unique identifier for the virtual machine
+- `CPU_min`, `CPU_max`, `CPU_avg`: CPU utilization statistics for each 5-minute interval
+
+#### 3. Plotting
+
+To plot a timeseries for a specific VM and resource (e.g., CPU_avg):
+
+```bash
+python prepare_timeseries.py --plot --vm_id <VM_ID> --resource CPU_avg
+```
+
+If `--vm_id` is not specified, the script will plot the first VM in the dataset.
+
+#### 4. Function Descriptions
+
+- `download_file(url, dest_path)`: Downloads a file from a URL if it does not already exist.
+- `decompress_gz_files(input_dir, output_dir)`: Decompresses all `.csv.gz` files in a directory.
+- `concatenate_csv_files(input_dir, output_csv)`: Concatenates all `.csv` files in a directory into a single CSV with header.
+- `prepare_timeseries(raw_data_path, output_path)`: Cleans and extracts the timeseries data, inferring the correct columns from the Azure schema.
+- `plot_timeseries(csv_path, vm_id, resource)`: Plots the specified resource timeseries for a given VM.
+
+#### 5. Requirements
+
+You will need the following Python packages:
+
+- pandas
+- matplotlib
+- requests
+
+Install them with:
+
+```bash
+pip install pandas matplotlib requests
+```
+
+---
+
+For more details, see the comments and docstrings in `prepare_timeseries.py`.
+
 There are currently four classes of traces:
 
 * VM Traces: two representative traces of the virtual machine (VM) workload of Microsoft Azure collected in 2017 and 2019, and one VM request trace specifically for investigating packing algorithms.
