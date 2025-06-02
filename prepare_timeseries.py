@@ -42,8 +42,9 @@ def decompress_gz_files(input_dir: str, output_dir: str):
 def concatenate_csv_files(input_dir: str, output_csv: str):
     """
     Concatenate all .csv files in input_dir into a single CSV with header.
-    If the files do not have a header, add a default header for AzurePublicDataset 2019 schema.
-    If the number of columns in the header does not match the data, adjust the header to match the data columns.
+    This function assumes that each file is a valid CSV with a header.
+    If the files do not have a header, it will add a default header for the 6-column schema.
+    If the number of columns in the header does not match the data, it will print a warning and skip the file.
     """
     csv_files = sorted(glob.glob(os.path.join(input_dir, "*.csv")))
     if not csv_files:
@@ -52,51 +53,35 @@ def concatenate_csv_files(input_dir: str, output_csv: str):
         for i, fname in enumerate(csv_files):
             with open(fname) as fin:
                 first_line = fin.readline()
-                # Peek at the next line to count columns in data
                 data_line = fin.readline()
                 fin.seek(0)
+                # Check if file has a header (assume header if any alpha in first value)
+                has_header = any(x.isalpha() for x in first_line.split(",")[0])
                 if i == 0:
-                    # Check if file has a header
-                    if not any(x.isalpha() for x in first_line.split(",")[0]):
-                        # No header, add default header
-                        data_cols = len(first_line.strip().split(","))
-                        default_header = (
-                            "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,"
-                            "vm_id,vm_created_ts,vm_deleted_ts,max_cpu,avg_cpu,p95_cpu,"
-                            "vm_category,vm_cores_bucket,vm_mem_bucket,reading_ts,"
-                            "min_cpu_5min,max_cpu_5min,avg_cpu_5min,core_bucket_def,mem_bucket_def"
-                        ).split(",")
-                        # Truncate or pad header to match data columns
-                        if data_cols < len(default_header):
-                            header = ",".join(default_header[:data_cols]) + "\n"
-                        elif data_cols > len(default_header):
-                            header = ",".join(default_header + [f"extra_col_{j+1}" for j in range(data_cols - len(default_header))]) + "\n"
-                        else:
-                            header = ",".join(default_header) + "\n"
-                        fout.write(header)
-                        fout.write(first_line)
-                        fout.write(fin.read())
-                    else:
-                        # File has header, check if header matches data columns
+                    if has_header:
                         header_cols = len(first_line.strip().split(","))
                         data_cols = len(data_line.strip().split(","))
                         if header_cols != data_cols:
-                            # Adjust header to match data columns
-                            header = first_line.strip().split(",")
-                            if data_cols < header_cols:
-                                header = header[:data_cols]
-                            elif data_cols > header_cols:
-                                header = header + [f"extra_col_{j+1}" for j in range(data_cols - header_cols)]
-                            fout.write(",".join(header) + "\n")
-                            # Write the first data line and the rest
-                            fout.write(data_line)
-                            fout.write(fin.read())
-                        else:
+                            print(f"Warning: Header/data column mismatch in {fname}. Skipping file.")
+                            continue
+                        fout.write(first_line)
+                        fout.write(data_line)
+                        fout.write(fin.read())
+                    else:
+                        # No header, add default 6-column header
+                        data_cols = len(first_line.strip().split(","))
+                        if data_cols == 6:
+                            header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,vm_id\n"
+                            fout.write(header)
                             fout.write(first_line)
                             fout.write(fin.read())
+                        else:
+                            print(f"Warning: Unknown schema with {data_cols} columns in {fname}. Skipping file.")
+                            continue
                 else:
                     # Skip header for subsequent files
-                    next(fin)
+                    if has_header:
+                        next(fin)
                     fout.write(fin.read())
     print(f"Concatenated {len(csv_files)} files into {output_csv}")
     # Print header of the generated CSV
