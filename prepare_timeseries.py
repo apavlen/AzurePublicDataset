@@ -61,9 +61,8 @@ def decompress_gz_files(input_dir: str, output_dir: str):
 def concatenate_csv_files(input_dir: str, output_csv: str):
     """
     Concatenate all .csv files in input_dir into a single CSV with header.
-    This function assumes that each file is a valid CSV with a header.
-    If the files do not have a header, it will add a default header for the 6-column schema.
-    If the number of columns in the header does not match the data, it will print a warning and skip the file.
+    This function will always write the header from the first file, and all data lines from all files.
+    If the first file does not have a header, it will infer the schema and add the correct header.
     """
     csv_files = sorted(glob.glob(os.path.join(input_dir, "*.csv")))
     if not csv_files:
@@ -78,25 +77,23 @@ def concatenate_csv_files(input_dir: str, output_csv: str):
                 has_header = any(x.isalpha() for x in first_line.split(",")[0])
                 if i == 0:
                     if has_header:
-                        header_cols = len(first_line.strip().split(","))
-                        data_cols = len(data_line.strip().split(","))
-                        if header_cols != data_cols:
-                            print(f"Warning: Header/data column mismatch in {fname}. Skipping file.")
-                            continue
                         fout.write(first_line)
                         fout.write(data_line)
                         fout.write(fin.read())
                     else:
-                        # No header, add default 6-column header
+                        # No header, infer schema and add correct header
                         data_cols = len(first_line.strip().split(","))
-                        if data_cols == 6:
+                        if data_cols == 20:
+                            header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,vm_id,vm_created_ts,vm_deleted_ts,max_cpu,avg_cpu,p95_cpu,vm_category,vm_cores_bucket,vm_mem_bucket,reading_ts,min_cpu_5min,max_cpu_5min,avg_cpu_5min,core_bucket_def,mem_bucket_def\n"
+                        elif data_cols == 6:
                             header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,vm_id\n"
-                            fout.write(header)
-                            fout.write(first_line)
-                            fout.write(fin.read())
+                        elif data_cols == 5:
+                            header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size\n"
                         else:
-                            print(f"Warning: Unknown schema with {data_cols} columns in {fname}. Skipping file.")
-                            continue
+                            header = ",".join([f"col_{i+1}" for i in range(data_cols)]) + "\n"
+                        fout.write(header)
+                        fout.write(first_line)
+                        fout.write(fin.read())
                 else:
                     # Skip header for subsequent files
                     if has_header:
