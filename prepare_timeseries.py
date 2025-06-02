@@ -67,24 +67,66 @@ def prepare_timeseries(
         columns (list): List of columns to extract and clean.
         outlier_bounds (dict): Dict of {col: (min, max)} for outlier removal.
     """
-    if columns is None:
-        columns = ['timestamp', 'vm_id', 'CPU', 'Memory', 'IO', 'Network', 'Disk']
-    if outlier_bounds is None:
-        outlier_bounds = {col: (0, 100) for col in columns if col not in ['timestamp', 'vm_id']}
+    # Try to infer the correct columns from the AzurePublicDataset schema
+    # For 2019 trace, the columns are:
+    # 1. Encrypted subscription id
+    # 2. Encrypted deployment id 
+    # 3. Timestamp in seconds (starting from 0) when first VM created
+    # 4. Count VMs created
+    # 5. Deployment size
+    # 6. Encrypted VM id
+    # 7. Timestamp VM created
+    # 8. Timestamp VM deleted
+    # 9. Max CPU utilization
+    # 10. Avg CPU utilization
+    # 11. P95 of Max CPU utilization
+    # 12. VM category
+    # 13. VM virtual core count bucket
+    # 14. VM memory (GBs) bucket
+    # 15. Timestamp in seconds (every 5 minutes)
+    # 16. Min CPU utilization during the 5 minutes
+    # 17. Max CPU utilization during the 5 minutes
+    # 18. Avg CPU utilization during the 5 minutes
+    # 19. VM virtual core count bucket definition
+    # 20. VM memory (GBs) bucket definition
 
-    if not os.path.exists(raw_data_path):
-        raise FileNotFoundError(f"Raw data file not found: {raw_data_path}")
+    # For 2017 trace, the columns are similar but with slight differences.
 
+    # Read the raw data
     df = pd.read_csv(raw_data_path)
 
-    # Select relevant columns
-    missing_cols = [col for col in columns if col not in df.columns]
-    if missing_cols:
-        raise ValueError(f"Missing columns in raw data: {missing_cols}")
-    df = df[columns]
+    # Try to detect the schema by number of columns
+    if len(df.columns) >= 18:
+        # 2019 or 2017 schema
+        # Assign column names if not present
+        if not all(isinstance(c, str) for c in df.columns):
+            # Assign names for 2019
+            df.columns = [
+                "subscription_id", "deployment_id", "first_vm_ts", "count_vms_created", "deployment_size",
+                "vm_id", "vm_created_ts", "vm_deleted_ts", "max_cpu", "avg_cpu", "p95_cpu",
+                "vm_category", "vm_cores_bucket", "vm_mem_bucket", "reading_ts",
+                "min_cpu_5min", "max_cpu_5min", "avg_cpu_5min", "core_bucket_def", "mem_bucket_def"
+            ][:len(df.columns)]
+        # Use the correct columns for time series
+        # We'll use: reading_ts, vm_id, min_cpu_5min, max_cpu_5min, avg_cpu_5min
+        columns = ["reading_ts", "vm_id", "min_cpu_5min", "max_cpu_5min", "avg_cpu_5min"]
+        df = df[columns]
+        # Rename for consistency
+        df = df.rename(columns={
+            "reading_ts": "timestamp",
+            "min_cpu_5min": "CPU_min",
+            "max_cpu_5min": "CPU_max",
+            "avg_cpu_5min": "CPU_avg"
+        })
+    else:
+        raise ValueError("Unknown schema: cannot find expected columns in raw data.")
 
-    # Convert timestamp to datetime and sort
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    # Convert timestamp to datetime if possible (assume seconds since epoch or since trace start)
+    try:
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+    except Exception:
+        pass
+
     df = df.sort_values(['vm_id', 'timestamp'])
 
     # Handle missing values (forward fill, then drop remaining)
@@ -93,9 +135,9 @@ def prepare_timeseries(
     # Remove duplicates
     df = df.drop_duplicates()
 
-    # Remove outliers
-    for col, (min_val, max_val) in outlier_bounds.items():
-        df = df[(df[col] >= min_val) & (df[col] <= max_val)]
+    # Remove outliers for CPU columns
+    for col in ['CPU_min', 'CPU_max', 'CPU_avg']:
+        df = df[(df[col] >= 0) & (df[col] <= 100)]
 
     # Save cleaned time series
     df.to_csv(output_path, index=False)
