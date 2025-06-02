@@ -197,14 +197,14 @@ def prepare_timeseries(
     else:
         print("No 'vm_id' column found in cleaned CSV.")
 
-def plot_timeseries(csv_path: str, vm_id: str = None, resource: str = "CPU", sample: int = 1000):
+def plot_timeseries(csv_path: str, vm_id: str = None, resource: str = "avg_cpu_5min", sample: int = 1000):
     """
     Plot a resource utilization time series for a given VM or all VMs.
 
     Args:
         csv_path (str): Path to the cleaned time series CSV.
         vm_id (str): VM ID to plot. If None, plot the first VM in the file.
-        resource (str): Resource column to plot (e.g., "CPU").
+        resource (str): Resource column to plot (e.g., "avg_cpu_5min").
         sample (int): Number of points to plot (for speed).
     """
     df = pd.read_csv(csv_path)
@@ -219,9 +219,11 @@ def plot_timeseries(csv_path: str, vm_id: str = None, resource: str = "CPU", sam
         raise ValueError(f"No data found for vm_id={vm_id}")
     if resource not in df_vm.columns:
         raise ValueError(f"Resource column '{resource}' not found in CSV. Available columns: {list(df_vm.columns)}")
+    # Use reading_ts as x-axis if available, otherwise use index
+    x = df_vm['reading_ts'][:sample] if 'reading_ts' in df_vm.columns else df_vm.index[:sample]
     plt.figure(figsize=(12, 5))
-    plt.plot(df_vm['timestamp'][:sample], df_vm[resource][:sample])
-    plt.xlabel("Timestamp")
+    plt.plot(x, df_vm[resource][:sample])
+    plt.xlabel("reading_ts" if 'reading_ts' in df_vm.columns else "Index")
     plt.ylabel(f"{resource} Utilization")
     plt.title(f"{resource} Utilization for VM {vm_id}")
     plt.xticks(rotation=45)
