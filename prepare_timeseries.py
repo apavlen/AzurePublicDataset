@@ -180,6 +180,14 @@ def prepare_timeseries(
             df['CPU_max'] = df['max_cpu_5min']
         if 'min_cpu_5min' in df.columns:
             df['CPU_min'] = df['min_cpu_5min']
+    elif len(df.columns) == 6:
+        # Fallback for 6-column files (likely: subscription_id, deployment_id, first_vm_ts, count_vms_created, deployment_size, vm_id)
+        # Try to assign column names and extract what we can
+        df.columns = [
+            "subscription_id", "deployment_id", "first_vm_ts", "count_vms_created", "deployment_size", "vm_id"
+        ]
+        # No time series or CPU data available, but keep for inspection
+        print("Warning: Only 6 columns found. No time series or CPU utilization data present in this file.")
     else:
         raise ValueError("Unknown schema: cannot find expected columns in raw data.")
 
