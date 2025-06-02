@@ -2,6 +2,10 @@ import pandas as pd
 import argparse
 import os
 import requests
+import glob
+import gzip
+import shutil
+import matplotlib.pyplot as plt
 
 def download_file(url: str, dest_path: str, chunk_size: int = 8192):
     """
@@ -16,6 +20,37 @@ def download_file(url: str, dest_path: str, chunk_size: int = 8192):
             if chunk:
                 f.write(chunk)
     print(f"Download complete: {dest_path}")
+
+def decompress_gz_files(input_dir: str, output_dir: str):
+    """
+    Decompress all .csv.gz files in input_dir to output_dir.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    gz_files = glob.glob(os.path.join(input_dir, "*.csv.gz"))
+    for gz_file in gz_files:
+        out_file = os.path.join(output_dir, os.path.basename(gz_file)[:-3])
+        print(f"Decompressing {gz_file} to {out_file}")
+        with gzip.open(gz_file, 'rb') as f_in, open(out_file, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+
+def concatenate_csv_files(input_dir: str, output_csv: str):
+    """
+    Concatenate all .csv files in input_dir into a single CSV with header.
+    """
+    csv_files = sorted(glob.glob(os.path.join(input_dir, "*.csv")))
+    if not csv_files:
+        raise FileNotFoundError(f"No CSV files found in {input_dir}")
+    with open(output_csv, 'w') as fout:
+        for i, fname in enumerate(csv_files):
+            with open(fname) as fin:
+                if i == 0:
+                    # Write header for the first file
+                    fout.write(fin.read())
+                else:
+                    # Skip header for subsequent files
+                    next(fin)
+                    fout.write(fin.read())
+    print(f"Concatenated {len(csv_files)} files into {output_csv}")
 
 def prepare_timeseries(
     raw_data_path: str,
@@ -66,19 +101,62 @@ def prepare_timeseries(
     df.to_csv(output_path, index=False)
     print(f"Cleaned time series saved to {output_path}")
 
+def plot_timeseries(csv_path: str, vm_id: str = None, resource: str = "CPU", sample: int = 1000):
+    """
+    Plot a resource utilization time series for a given VM or all VMs.
+
+    Args:
+        csv_path (str): Path to the cleaned time series CSV.
+        vm_id (str): VM ID to plot. If None, plot the first VM in the file.
+        resource (str): Resource column to plot (e.g., "CPU").
+        sample (int): Number of points to plot (for speed).
+    """
+    df = pd.read_csv(csv_path)
+    if vm_id is None:
+        vm_id = df['vm_id'].iloc[0]
+    df_vm = df[df['vm_id'] == vm_id]
+    if df_vm.empty:
+        raise ValueError(f"No data found for vm_id={vm_id}")
+    plt.figure(figsize=(12, 5))
+    plt.plot(df_vm['timestamp'][:sample], df_vm[resource][:sample])
+    plt.xlabel("Timestamp")
+    plt.ylabel(f"{resource} Utilization")
+    plt.title(f"{resource} Utilization for VM {vm_id}")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download and prepare a time series dataset for resource utilization.")
-    parser.add_argument("--download_url", type=str, default=None, help="URL to download the raw resource data CSV")
-    parser.add_argument("--raw_data", type=str, default="data/raw_resource_data.csv", help="Path to raw resource data CSV")
+    parser = argparse.ArgumentParser(description="Download, decompress, concatenate, and prepare a time series dataset for resource utilization.")
+    parser.add_argument("--download_url", type=str, default=None, help="URL to download a .csv.gz file")
+    parser.add_argument("--download_dir", type=str, default="data/raw_gz", help="Directory to store downloaded .csv.gz files")
+    parser.add_argument("--decompressed_dir", type=str, default="data/raw_csv", help="Directory to store decompressed .csv files")
+    parser.add_argument("--concat_csv", type=str, default="data/combined_raw.csv", help="Path to concatenated raw CSV")
     parser.add_argument("--output", type=str, default="data/cleaned_resource_timeseries.csv", help="Path to save cleaned time series CSV")
+    parser.add_argument("--plot", action="store_true", help="Plot a sample timeseries after processing")
+    parser.add_argument("--vm_id", type=str, default=None, help="VM ID to plot (optional)")
+    parser.add_argument("--resource", type=str, default="CPU", help="Resource to plot (default: CPU)")
     args = parser.parse_args()
 
-    # Step 1: Download the raw data if a URL is provided
+    # Step 1: Download a .csv.gz file if a URL is provided
     if args.download_url:
-        download_file(args.download_url, args.raw_data)
+        os.makedirs(args.download_dir, exist_ok=True)
+        filename = os.path.basename(args.download_url)
+        dest_path = os.path.join(args.download_dir, filename)
+        download_file(args.download_url, dest_path)
 
-    # Step 2: Prepare and clean the time series
+    # Step 2: Decompress all .csv.gz files in download_dir
+    decompress_gz_files(args.download_dir, args.decompressed_dir)
+
+    # Step 3: Concatenate all .csv files in decompressed_dir
+    concatenate_csv_files(args.decompressed_dir, args.concat_csv)
+
+    # Step 4: Prepare and clean the time series
     prepare_timeseries(
-        raw_data_path=args.raw_data,
+        raw_data_path=args.concat_csv,
         output_path=args.output
     )
+
+    # Step 5: Optionally plot a timeseries
+    if args.plot:
+        plot_timeseries(args.output, vm_id=args.vm_id, resource=args.resource)
