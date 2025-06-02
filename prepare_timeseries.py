@@ -96,15 +96,15 @@ def concatenate_csv_files(input_dir: str, output_csv: str):
         header = fcheck.readline().strip()
         print(f"Header of generated CSV: {header}")
 
-def prepare_timeseries(raw_data_path: str, output_path: str):
+def prepare_timeseries_per_vm(raw_data_path: str, output_dir: str):
     """
     Prepare and clean a time series dataset for Azure VM CPU utilization.
+    Write a separate cleaned CSV file for each VM in output_dir.
     """
     expected_cols = ['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']
     df = pd.read_csv(raw_data_path)
     if df.shape[0] == 0 or df.shape[1] == 0:
         print("Warning: No data found in the concatenated CSV.")
-        df.to_csv(output_path, index=False)
         return
     if list(df.columns) != expected_cols:
         df.columns = expected_cols
@@ -113,19 +113,16 @@ def prepare_timeseries(raw_data_path: str, output_path: str):
     df = df.drop_duplicates()
     for col in ['min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']:
         df = df[(df[col] >= 0) & (df[col] <= 100)]
-    df.to_csv(output_path, index=False)
-    print(f"Cleaned time series saved to {output_path}")
-    print("Sample of cleaned CSV:")
-    print(df.head())
-    if 'vm_id' in df.columns:
-        unique_vms = df['vm_id'].nunique()
-        print(f"Number of unique VMs in cleaned CSV: {unique_vms}")
-        print("Rows per VM (first 5 VMs):")
-        for vm in df['vm_id'].unique()[:5]:
-            count = (df['vm_id'] == vm).sum()
-            print(f"  VM {vm}: {count} rows")
-    else:
-        print("No 'vm_id' column found in cleaned CSV.")
+    os.makedirs(output_dir, exist_ok=True)
+    vm_ids = df['vm_id'].unique()
+    for vm_id in vm_ids:
+        vm_df = df[df['vm_id'] == vm_id]
+        if vm_df.empty:
+            continue
+        safe_id = _safe_vm_id(vm_id)
+        out_path = os.path.join(output_dir, f"{safe_id}.csv")
+        vm_df.to_csv(out_path, index=False)
+    print(f"Wrote {len(vm_ids)} per-VM time series files to {output_dir}")
 
 import hashlib
 
@@ -169,16 +166,13 @@ def plot_timeseries(csv_path: str, vm_ids: list = None, sample: int = 1000, outp
             logging.info(f"Saved plot: {fname}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download, prepare, and plot Azure VM CPU time series data.")
+    parser = argparse.ArgumentParser(description="Download and prepare Azure VM CPU time series data. (Plotting is now a separate step.)")
     parser.add_argument("--links_file", type=str, default="AzurePublicDatasetLinksV2.txt", help="Text file with Azure dataset links")
     parser.add_argument("--download_dir", type=str, default="data/raw_gz", help="Directory to store downloaded .csv.gz files")
     parser.add_argument("--num_traces", type=int, default=1, help="Number of VM CPU reading traces to download")
     parser.add_argument("--decompressed_dir", type=str, default="data/raw_csv", help="Directory with decompressed .csv files")
     parser.add_argument("--concat_csv", type=str, default="data/combined_raw.csv", help="Path to concatenated raw CSV")
-    parser.add_argument("--output", type=str, default="data/cleaned_resource_timeseries.csv", help="Path to save cleaned time series CSV")
-    parser.add_argument("--plot", action="store_true", help="Plot all resource columns for selected VMs after processing")
-    parser.add_argument("--plot_dir", type=str, default="plots", help="Directory to save plots")
-    parser.add_argument("--plot_vm_count", type=int, default=5, help="Number of VMs to plot")
+    parser.add_argument("--per_vm_dir", type=str, default="data/per_vm_timeseries", help="Directory to save per-VM cleaned time series CSVs")
     parser.add_argument("--decompress_workers", type=int, default=8, help="Number of parallel workers for decompression")
     args = parser.parse_args()
 
@@ -191,23 +185,8 @@ if __name__ == "__main__":
     # Step 3: Concatenate all .csv files in decompressed_dir
     concatenate_csv_files(args.decompressed_dir, args.concat_csv)
 
-    # Step 4: Prepare and clean the time series
-    prepare_timeseries(
+    # Step 4: Prepare and clean the time series, writing one file per VM
+    prepare_timeseries_per_vm(
         raw_data_path=args.concat_csv,
-        output_path=args.output
+        output_dir=args.per_vm_dir
     )
-
-    # Step 5: Print stats/logging
-    df = pd.read_csv(args.output)
-    logging.info(f"Total rows in cleaned CSV: {len(df)}")
-    if 'vm_id' in df.columns:
-        unique_vms = df['vm_id'].nunique()
-        logging.info(f"Number of unique VMs: {unique_vms}")
-        logging.info(f"Rows per VM (first {args.plot_vm_count} VMs):")
-        for vm in df['vm_id'].unique()[:args.plot_vm_count]:
-            count = (df['vm_id'] == vm).sum()
-            logging.info(f"  VM {vm}: {count} rows")
-
-    # Step 6: Optionally plot all resource columns for selected VMs
-    if args.plot:
-        plot_timeseries(args.output, vm_ids=list(df['vm_id'].unique()[:args.plot_vm_count]), output_dir=args.plot_dir)
