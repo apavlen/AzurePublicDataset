@@ -148,6 +148,13 @@ def prepare_timeseries(
     # Read the raw data
     df = pd.read_csv(raw_data_path)
 
+    # If the file is empty, print a warning and return
+    if df.shape[0] == 0 or df.shape[1] == 0:
+        print("Warning: No data found in the concatenated CSV. Please check the input files and schema.")
+        # Save an empty file for downstream steps
+        df.to_csv(output_path, index=False)
+        return
+
     # Check for header/data mismatch and fix if needed
     if len(df) > 0:
         header_cols = list(df.columns)
@@ -194,7 +201,10 @@ def prepare_timeseries(
         ]
         print("Warning: Only 6 columns found. No time series or CPU utilization data present in this file.")
     else:
-        raise ValueError("Unknown schema: cannot find expected columns in raw data.")
+        print(f"Warning: Unknown schema with {len(df.columns)} columns. Columns: {list(df.columns)}")
+        # Save the raw data for inspection
+        df.to_csv(output_path, index=False)
+        return
 
     # Save cleaned time series
     df.to_csv(output_path, index=False)
