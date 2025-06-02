@@ -27,6 +27,7 @@ def download_file(url: str, dest_path: str, chunk_size: int = 8192):
 def decompress_gz_files(input_dir: str, output_dir: str):
     """
     Decompress all .csv.gz files in input_dir to output_dir, unless already decompressed.
+    If the decompressed file does not have a header, add the correct header based on the AzurePublicDataset schema.
     """
     os.makedirs(output_dir, exist_ok=True)
     gz_files = glob.glob(os.path.join(input_dir, "*.csv.gz"))
@@ -36,7 +37,25 @@ def decompress_gz_files(input_dir: str, output_dir: str):
             print(f"File already decompressed, skipping: {out_file}")
             continue
         print(f"Decompressing {gz_file} to {out_file}")
-        with gzip.open(gz_file, 'rb') as f_in, open(out_file, 'wb') as f_out:
+        # Read the first line to check for header
+        with gzip.open(gz_file, 'rt') as f_in:
+            first_line = f_in.readline()
+            has_header = any(x.isalpha() for x in first_line.split(",")[0])
+        with gzip.open(gz_file, 'rt') as f_in, open(out_file, 'w') as f_out:
+            if not has_header:
+                # Try to infer schema by number of columns in first line
+                col_count = len(first_line.strip().split(","))
+                if col_count == 20:
+                    header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,vm_id,vm_created_ts,vm_deleted_ts,max_cpu,avg_cpu,p95_cpu,vm_category,vm_cores_bucket,vm_mem_bucket,reading_ts,min_cpu_5min,max_cpu_5min,avg_cpu_5min,core_bucket_def,mem_bucket_def\n"
+                elif col_count == 6:
+                    header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,vm_id\n"
+                elif col_count == 5:
+                    header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size\n"
+                else:
+                    header = ",".join([f"col_{i+1}" for i in range(col_count)]) + "\n"
+                f_out.write(header)
+            # Write the rest of the file (including first line)
+            f_in.seek(0)
             shutil.copyfileobj(f_in, f_out)
 
 def concatenate_csv_files(input_dir: str, output_csv: str):
