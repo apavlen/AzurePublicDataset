@@ -9,6 +9,7 @@ def decompress_gz_files(input_dir: str, output_dir: str):
     """
     Decompress all .csv.gz files in input_dir to output_dir, unless already decompressed.
     Always add the correct header for Azure VM CPU readings if missing.
+    Only keep the columns: reading_ts,vm_id,min_cpu_5min,max_cpu_5min,avg_cpu_5min
     """
     os.makedirs(output_dir, exist_ok=True)
     gz_files = glob.glob(os.path.join(input_dir, "*.csv.gz"))
@@ -23,10 +24,17 @@ def decompress_gz_files(input_dir: str, output_dir: str):
             first_line = f_in.readline()
             has_header = any(x.isalpha() for x in first_line.split(",")[0])
         with gzip.open(gz_file, 'rt') as f_in, open(out_file, 'w') as f_out:
-            if not has_header:
-                f_out.write(header)
+            # Always write the correct header
+            f_out.write(header)
             f_in.seek(0)
-            f_out.write(f_in.read())
+            # If the file has a header, skip it
+            if has_header:
+                next(f_in)
+            for line in f_in:
+                # Only keep the first 5 columns
+                cols = line.rstrip("\n").split(",")
+                if len(cols) >= 5:
+                    f_out.write(",".join(cols[:5]) + "\n")
 
 def concatenate_csv_files(input_dir: str, output_csv: str):
     """
