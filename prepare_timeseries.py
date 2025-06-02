@@ -1,68 +1,37 @@
 import pandas as pd
 import argparse
 import os
-import requests
 import glob
 import gzip
-import shutil
 import matplotlib.pyplot as plt
-
-def download_file(url: str, dest_path: str, chunk_size: int = 8192):
-    """
-    Download a file from a URL to a local destination, unless it already exists.
-    """
-    if os.path.exists(dest_path):
-        print(f"File already exists, skipping download: {dest_path}")
-        return
-    print(f"Downloading {url} to {dest_path} ...")
-    response = requests.get(url, stream=True)
-    response.raise_for_status()
-    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    with open(dest_path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=chunk_size):
-            if chunk:
-                f.write(chunk)
-    print(f"Download complete: {dest_path}")
 
 def decompress_gz_files(input_dir: str, output_dir: str):
     """
     Decompress all .csv.gz files in input_dir to output_dir, unless already decompressed.
-    If the decompressed file does not have a header, add the correct header based on the AzurePublicDataset schema.
+    Always add the correct header for Azure VM CPU readings if missing.
     """
     os.makedirs(output_dir, exist_ok=True)
     gz_files = glob.glob(os.path.join(input_dir, "*.csv.gz"))
+    header = "reading_ts,vm_id,min_cpu_5min,max_cpu_5min,avg_cpu_5min\n"
     for gz_file in gz_files:
         out_file = os.path.join(output_dir, os.path.basename(gz_file)[:-3])
         if os.path.exists(out_file):
             print(f"File already decompressed, skipping: {out_file}")
             continue
         print(f"Decompressing {gz_file} to {out_file}")
-        # Read the first line to check for header
         with gzip.open(gz_file, 'rt') as f_in:
             first_line = f_in.readline()
             has_header = any(x.isalpha() for x in first_line.split(",")[0])
         with gzip.open(gz_file, 'rt') as f_in, open(out_file, 'w') as f_out:
             if not has_header:
-                # Try to infer schema by number of columns in first line
-                col_count = len(first_line.strip().split(","))
-                if col_count == 20:
-                    header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,vm_id,vm_created_ts,vm_deleted_ts,max_cpu,avg_cpu,p95_cpu,vm_category,vm_cores_bucket,vm_mem_bucket,reading_ts,min_cpu_5min,max_cpu_5min,avg_cpu_5min,core_bucket_def,mem_bucket_def\n"
-                elif col_count == 6:
-                    header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,vm_id\n"
-                elif col_count == 5:
-                    header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size\n"
-                else:
-                    header = ",".join([f"col_{i+1}" for i in range(col_count)]) + "\n"
                 f_out.write(header)
-            # Write the rest of the file (including first line)
             f_in.seek(0)
-            shutil.copyfileobj(f_in, f_out)
+            f_out.write(f_in.read())
 
 def concatenate_csv_files(input_dir: str, output_csv: str):
     """
     Concatenate all .csv files in input_dir into a single CSV with header.
-    This function will always write the header from the first file, and all data lines from all files.
-    If the first file does not have a header, it will infer the schema and add the correct header.
+    Assumes all files have the correct header.
     """
     csv_files = sorted(glob.glob(os.path.join(input_dir, "*.csv")))
     if not csv_files:
@@ -70,98 +39,33 @@ def concatenate_csv_files(input_dir: str, output_csv: str):
     with open(output_csv, 'w') as fout:
         for i, fname in enumerate(csv_files):
             with open(fname) as fin:
-                first_line = fin.readline()
-                data_line = fin.readline()
-                fin.seek(0)
-                # Check if file has a header (assume header if any alpha in first value)
-                has_header = any(x.isalpha() for x in first_line.split(",")[0])
+                lines = fin.readlines()
                 if i == 0:
-                    if has_header:
-                        fout.write(first_line)
-                        fout.write(data_line)
-                        fout.write(fin.read())
-                    else:
-                        # No header, infer schema and add correct header
-                        data_cols = len(first_line.strip().split(","))
-                        if data_cols == 20:
-                            header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,vm_id,vm_created_ts,vm_deleted_ts,max_cpu,avg_cpu,p95_cpu,vm_category,vm_cores_bucket,vm_mem_bucket,reading_ts,min_cpu_5min,max_cpu_5min,avg_cpu_5min,core_bucket_def,mem_bucket_def\n"
-                        elif data_cols == 6:
-                            header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size,vm_id\n"
-                        elif data_cols == 5:
-                            header = "subscription_id,deployment_id,first_vm_ts,count_vms_created,deployment_size\n"
-                        else:
-                            header = ",".join([f"col_{i+1}" for i in range(data_cols)]) + "\n"
-                        fout.write(header)
-                        fout.write(first_line)
-                        fout.write(fin.read())
+                    fout.writelines(lines)
                 else:
-                    # Skip header for subsequent files
-                    if has_header:
-                        next(fin)
-                    fout.write(fin.read())
+                    fout.writelines(lines[1:])  # skip header
     print(f"Concatenated {len(csv_files)} files into {output_csv}")
-    # Print header of the generated CSV
     with open(output_csv, 'r') as fcheck:
         header = fcheck.readline().strip()
         print(f"Header of generated CSV: {header}")
 
-def prepare_timeseries(
-    raw_data_path: str,
-    output_path: str,
-    columns: list = None,
-    outlier_bounds: dict = None
-):
+def prepare_timeseries(raw_data_path: str, output_path: str):
     """
     Prepare and clean a time series dataset for Azure VM CPU utilization.
-
-    Args:
-        raw_data_path (str): Path to the raw CSV dataset.
-        output_path (str): Path to save the cleaned time series CSV.
-        columns (list): List of columns to extract and clean (optional).
-        outlier_bounds (dict): Dict of {col: (min, max)} for outlier removal (optional).
     """
-    # The canonical Azure 2019 VM CPU readings schema is:
-    # reading_ts,vm_id,min_cpu_5min,max_cpu_5min,avg_cpu_5min
-
-    # Read the raw data
-    df = pd.read_csv(raw_data_path)
-
-    # If the file is empty, print a warning and return
-    if df.shape[0] == 0 or df.shape[1] == 0:
-        print("Warning: No data found in the concatenated CSV. Please check the input files and schema.")
-        df.to_csv(output_path, index=False)
-        return
-
-    # If the columns are unnamed or generic, assign the correct schema
     expected_cols = ['reading_ts', 'vm_id', 'min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']
-    # If the file has more columns, try to find the expected columns
-    if set(expected_cols).issubset(df.columns):
-        # Already has correct columns
-        df = df[expected_cols]
-    elif len(df.columns) >= 5:
-        # Try to assign expected columns if unnamed or generic
-        # Accept both with and without header
-        # If first row is not header, assign columns
-        if not any(x.isalpha() for x in str(df.columns[0])):
-            df.columns = expected_cols + [f"extra_col_{i+1}" for i in range(len(df.columns)-5)]
-            df = df[expected_cols]
-        else:
-            # Try to find columns by position
-            df = df.iloc[:, :5]
-            df.columns = expected_cols
-    else:
-        print(f"Warning: Could not find expected time series columns. Columns: {list(df.columns)}")
+    df = pd.read_csv(raw_data_path)
+    if df.shape[0] == 0 or df.shape[1] == 0:
+        print("Warning: No data found in the concatenated CSV.")
         df.to_csv(output_path, index=False)
         return
-
-    # Sort and clean
+    if list(df.columns) != expected_cols:
+        df.columns = expected_cols
     df = df.sort_values(['vm_id', 'reading_ts'])
     df = df.ffill().dropna()
     df = df.drop_duplicates()
     for col in ['min_cpu_5min', 'max_cpu_5min', 'avg_cpu_5min']:
         df = df[(df[col] >= 0) & (df[col] <= 100)]
-
-    # Save cleaned time series
     df.to_csv(output_path, index=False)
     print(f"Cleaned time series saved to {output_path}")
     print("Sample of cleaned CSV:")
@@ -178,13 +82,7 @@ def prepare_timeseries(
 
 def plot_timeseries(csv_path: str, vm_id: str = None, resource: str = "avg_cpu_5min", sample: int = 1000):
     """
-    Plot a resource utilization time series for a given VM or all VMs.
-
-    Args:
-        csv_path (str): Path to the cleaned time series CSV.
-        vm_id (str): VM ID to plot. If None, plot the first VM in the file.
-        resource (str): Resource column to plot (e.g., "avg_cpu_5min").
-        sample (int): Number of points to plot (for speed).
+    Plot a CPU utilization time series for a given VM.
     """
     df = pd.read_csv(csv_path)
     if 'vm_id' not in df.columns:
@@ -198,11 +96,10 @@ def plot_timeseries(csv_path: str, vm_id: str = None, resource: str = "avg_cpu_5
         raise ValueError(f"No data found for vm_id={vm_id}")
     if resource not in df_vm.columns:
         raise ValueError(f"Resource column '{resource}' not found in CSV. Available columns: {list(df_vm.columns)}")
-    # Use reading_ts as x-axis if available, otherwise use index
-    x = df_vm['reading_ts'][:sample] if 'reading_ts' in df_vm.columns else df_vm.index[:sample]
+    x = df_vm['reading_ts'][:sample]
     plt.figure(figsize=(12, 5))
     plt.plot(x, df_vm[resource][:sample])
-    plt.xlabel("reading_ts" if 'reading_ts' in df_vm.columns else "Index")
+    plt.xlabel("reading_ts")
     plt.ylabel(f"{resource} Utilization")
     plt.title(f"{resource} Utilization for VM {vm_id}")
     plt.xticks(rotation=45)
@@ -210,36 +107,26 @@ def plot_timeseries(csv_path: str, vm_id: str = None, resource: str = "avg_cpu_5
     plt.show()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download, decompress, concatenate, and prepare a time series dataset for resource utilization.")
-    parser.add_argument("--download_url", type=str, default=None, help="URL to download a .csv.gz file")
-    parser.add_argument("--download_dir", type=str, default="data/raw_gz", help="Directory to store downloaded .csv.gz files")
-    parser.add_argument("--decompressed_dir", type=str, default="data/raw_csv", help="Directory to store decompressed .csv files")
+    parser = argparse.ArgumentParser(description="Prepare and plot Azure VM CPU time series data.")
+    parser.add_argument("--decompressed_dir", type=str, default="data/raw_csv", help="Directory with decompressed .csv files")
     parser.add_argument("--concat_csv", type=str, default="data/combined_raw.csv", help="Path to concatenated raw CSV")
     parser.add_argument("--output", type=str, default="data/cleaned_resource_timeseries.csv", help="Path to save cleaned time series CSV")
     parser.add_argument("--plot", action="store_true", help="Plot a sample timeseries after processing")
     parser.add_argument("--vm_id", type=str, default=None, help="VM ID to plot (optional)")
-    parser.add_argument("--resource", type=str, default="CPU", help="Resource to plot (default: CPU)")
     args = parser.parse_args()
 
-    # Step 1: Download a .csv.gz file if a URL is provided
-    if args.download_url:
-        os.makedirs(args.download_dir, exist_ok=True)
-        filename = os.path.basename(args.download_url)
-        dest_path = os.path.join(args.download_dir, filename)
-        download_file(args.download_url, dest_path)
+    # Step 1: Decompress all .csv.gz files in raw_gz to raw_csv
+    decompress_gz_files("data/raw_gz", args.decompressed_dir)
 
-    # Step 2: Decompress all .csv.gz files in download_dir
-    decompress_gz_files(args.download_dir, args.decompressed_dir)
-
-    # Step 3: Concatenate all .csv files in decompressed_dir
+    # Step 2: Concatenate all .csv files in decompressed_dir
     concatenate_csv_files(args.decompressed_dir, args.concat_csv)
 
-    # Step 4: Prepare and clean the time series
+    # Step 3: Prepare and clean the time series
     prepare_timeseries(
         raw_data_path=args.concat_csv,
         output_path=args.output
     )
 
-    # Step 5: Optionally plot a timeseries
+    # Step 4: Optionally plot a timeseries
     if args.plot:
-        plot_timeseries(args.output, vm_id=args.vm_id, resource=args.resource)
+        plot_timeseries(args.output, vm_id=args.vm_id)
