@@ -1,6 +1,21 @@
 import pandas as pd
 import argparse
 import os
+import requests
+
+def download_file(url: str, dest_path: str, chunk_size: int = 8192):
+    """
+    Download a file from a URL to a local destination.
+    """
+    print(f"Downloading {url} to {dest_path} ...")
+    response = requests.get(url, stream=True)
+    response.raise_for_status()
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    with open(dest_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=chunk_size):
+            if chunk:
+                f.write(chunk)
+    print(f"Download complete: {dest_path}")
 
 def prepare_timeseries(
     raw_data_path: str,
@@ -52,11 +67,17 @@ def prepare_timeseries(
     print(f"Cleaned time series saved to {output_path}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Prepare and clean a time series dataset for resource utilization.")
+    parser = argparse.ArgumentParser(description="Download and prepare a time series dataset for resource utilization.")
+    parser.add_argument("--download_url", type=str, default=None, help="URL to download the raw resource data CSV")
     parser.add_argument("--raw_data", type=str, default="data/raw_resource_data.csv", help="Path to raw resource data CSV")
     parser.add_argument("--output", type=str, default="data/cleaned_resource_timeseries.csv", help="Path to save cleaned time series CSV")
     args = parser.parse_args()
 
+    # Step 1: Download the raw data if a URL is provided
+    if args.download_url:
+        download_file(args.download_url, args.raw_data)
+
+    # Step 2: Prepare and clean the time series
     prepare_timeseries(
         raw_data_path=args.raw_data,
         output_path=args.output
