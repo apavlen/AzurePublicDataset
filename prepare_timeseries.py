@@ -9,8 +9,11 @@ import matplotlib.pyplot as plt
 
 def download_file(url: str, dest_path: str, chunk_size: int = 8192):
     """
-    Download a file from a URL to a local destination.
+    Download a file from a URL to a local destination, unless it already exists.
     """
+    if os.path.exists(dest_path):
+        print(f"File already exists, skipping download: {dest_path}")
+        return
     print(f"Downloading {url} to {dest_path} ...")
     response = requests.get(url, stream=True)
     response.raise_for_status()
@@ -51,6 +54,10 @@ def concatenate_csv_files(input_dir: str, output_csv: str):
                     next(fin)
                     fout.write(fin.read())
     print(f"Concatenated {len(csv_files)} files into {output_csv}")
+    # Print header of the generated CSV
+    with open(output_csv, 'r') as fcheck:
+        header = fcheck.readline().strip()
+        print(f"Header of generated CSV: {header}")
 
 def prepare_timeseries(
     raw_data_path: str,
@@ -142,6 +149,16 @@ def prepare_timeseries(
     # Save cleaned time series
     df.to_csv(output_path, index=False)
     print(f"Cleaned time series saved to {output_path}")
+    # Print header and a few rows for inspection
+    print("Sample of cleaned CSV:")
+    print(df.head())
+    # Check if generated CSV is per VM
+    unique_vms = df['vm_id'].nunique()
+    print(f"Number of unique VMs in cleaned CSV: {unique_vms}")
+    print("Rows per VM (first 5 VMs):")
+    for vm in df['vm_id'].unique()[:5]:
+        count = (df['vm_id'] == vm).sum()
+        print(f"  VM {vm}: {count} rows")
 
 def plot_timeseries(csv_path: str, vm_id: str = None, resource: str = "CPU", sample: int = 1000):
     """
